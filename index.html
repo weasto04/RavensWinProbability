@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Ravens Win Probability 2024</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg:#0a0d12; --panel:#141a23; --text:#eef3fa; --accent:#7c3aed; --accent-fade:#7c3aed55; --grid:#2a3442; --danger:#ef4444; --win:#10b981; --loss:#f87171; --highlight:#fbbf24;
+    font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  body { margin:0; background:var(--bg); color:var(--text); }
+  header { padding:1rem 1.25rem; background:linear-gradient(90deg,#111827,#1e293b); display:flex; flex-wrap:wrap; align-items:center; gap:1rem; }
+  header h1 { font-size:1.25rem; margin:0; font-weight:600; letter-spacing:.5px; }
+  select { background:var(--panel); color:var(--text); border:1px solid #334155; padding:.5rem .75rem; border-radius:.5rem; }
+  main { max-width:1200px; margin:0 auto; padding:1rem 1.25rem 2rem; }
+  .layout { display:grid; grid-template-columns:1fr 300px; gap:1.25rem; }
+  @media (max-width:1100px){ .layout { grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid #243044; border-radius:0.75rem; padding:1rem 1.25rem; position:relative; }
+  .badge { display:inline-block; background:var(--highlight); color:#000; font-weight:600; padding:.2rem .55rem; border-radius:999px; font-size:.7rem; letter-spacing:.5px; vertical-align:middle; margin-left:.5rem; }
+  #chartWrapper { position:relative; }
+  svg { width:100%; height:520px; overflow:visible; }
+  .axis text { fill:#cbd5e1; font-size:11px; }
+  .axis line, .axis path { stroke:#475569; stroke-width:1; shape-rendering:crispEdges; }
+  .grid line { stroke:var(--grid); stroke-width:1; }
+  .wp-line { fill:none; stroke:var(--accent); stroke-width:2.2; }
+  .wp-line.highlight { stroke:var(--highlight); filter:drop-shadow(0 0 6px #fbbf24aa); }
+  .midline { stroke:#94a3b8; stroke-dasharray:5 6; stroke-width:1.3; }
+  .endpoint { stroke:#000; stroke-width:1; }
+  .endpoint.win { fill:var(--win); }
+  .endpoint.loss { fill:var(--loss); }
+  .legend { font-size:.75rem; display:flex; gap:1rem; flex-wrap:wrap; margin-top:.5rem; }
+  .legend span { display:inline-flex; align-items:center; gap:.35rem; }
+  .legend i { width:14px; height:14px; display:inline-block; border-radius:3px; }
+  /* tooltip removed */
+  a { color:var(--highlight); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .metrics { font-size:.75rem; line-height:1.2rem; margin-top:.75rem; display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:.4rem .75rem; }
+  .metrics b { font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ravens Win Probability 2024 <span id="highlightBadge" style="display:none" class="badge">MOST EXCITING</span></h1>
+  <label style="font-size:.8rem; display:flex; flex-direction:column; gap:.25rem; font-weight:500;">
+    Select Game / Week
+    <select id="gameSelect"></select>
+  </label>
+</header>
+<main>
+  <div class="layout">
+    <div id="chartPanel" class="card">
+      <div id="chartWrapper">
+        <svg id="chart" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet"></svg>
+  <!-- tooltip removed -->
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--accent);"></i> Game WP Line</span>
+        <span><i style="background:var(--highlight);"></i> Highlighted (Most Exciting)</span>
+        <span><i style="background:var(--win);"></i> Win Endpoint</span>
+        <span><i style="background:var(--loss);"></i> Loss Endpoint</span>
+        <span><i style="background:#94a3b8;"></i> 50% Midline</span>
+      </div>
+    </div>
+    <div class="card" id="infoPanel">
+      <h2 style="margin-top:0;font-size:1rem;">Game Details</h2>
+      <div id="gameMeta" style="font-size:.85rem; line-height:1.15rem; white-space:pre-line;"></div>
+      <p id="exciteDesc" style="margin-top:.75rem; font-size:.65rem; opacity:.75; line-height:1.1rem;">
+        Highlighted game (badge) = most lead changes (crossings of the 50% line).<br>
+        Tie goes to the game with the bigger overall range (max WP - min WP).
+      </p>
+    </div>
+  </div>
+</main>
+<script>
+(async function(){
+  const res = await fetch('ravens_wp.json');
+  const data = await res.json();
+  const games = data.games;
+  const mostExciting = data.most_exciting_game_id;
+
+  const select = document.getElementById('gameSelect');
+  games.forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.game_id;
+    const wk = g.week ? `W${g.week}` : '';
+    opt.textContent = `${wk} ${g.away_team} @ ${g.home_team} (${g.result})`;
+    if(g.game_id === mostExciting) opt.textContent += ' ★';
+    select.appendChild(opt);
+  });
+  select.value = mostExciting || games[0].game_id;
+
+  const svg = document.getElementById('chart');
+  const highlightBadge = document.getElementById('highlightBadge');
+  const metaEl = document.getElementById('gameMeta');
+
+  const width = 1000; const height = 520; const margin = {l:60,r:25,t:15,b:40};
+  const innerW = width - margin.l - margin.r;
+  const innerH = height - margin.t - margin.b;
+
+  function scaleX(min) { return margin.l + (min/60)*innerW; }
+  function scaleY(wp) { return margin.t + (1 - wp)*innerH; }
+
+  function fmtPct(v){ return (v*100).toFixed(1)+'%'; }
+  function fmtMin(v){ return v.toFixed(1)+'m'; }
+
+  function renderAxes(){
+    // Clear
+    svg.innerHTML = '';
+    // Background grid horizontal
+    const ySteps = 5;
+    for(let i=0;i<=ySteps;i++){
+      const yVal = i / ySteps; // 0..1
+      const y = scaleY(yVal);
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', margin.l); line.setAttribute('x2', width - margin.r);
+      line.setAttribute('y1', y); line.setAttribute('y2', y); line.setAttribute('stroke', '#1f2732');
+      svg.appendChild(line);
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+      lbl.setAttribute('x', margin.l - 8); lbl.setAttribute('y', y + 4); lbl.setAttribute('text-anchor','end');
+      lbl.setAttribute('fill','#94a3b8'); lbl.setAttribute('font-size','11');
+      lbl.textContent = fmtPct(yVal);
+      svg.appendChild(lbl);
+    }
+    // X axis
+    for(let m=0;m<=60;m+=10){
+      const x = scaleX(m);
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+      lbl.setAttribute('x', x); lbl.setAttribute('y', height - margin.b + 18); lbl.setAttribute('text-anchor','middle');
+      lbl.setAttribute('fill','#94a3b8'); lbl.setAttribute('font-size','11');
+      lbl.textContent = m;
+      svg.appendChild(lbl);
+      const t = document.createElementNS('http://www.w3.org/2000/svg','line');
+      t.setAttribute('x1', x); t.setAttribute('x2', x); t.setAttribute('y1', height - margin.b); t.setAttribute('y2', height - margin.b + 4);
+      t.setAttribute('stroke','#475569'); svg.appendChild(t);
+    }
+    // Axis labels
+    const yl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    yl.setAttribute('x', margin.l - 45); yl.setAttribute('y', margin.t + innerH/2); yl.setAttribute('text-anchor','middle');
+    yl.setAttribute('fill','#cbd5e1'); yl.setAttribute('font-size','12'); yl.setAttribute('transform',`rotate(-90 ${margin.l - 45} ${margin.t + innerH/2})`);
+    yl.textContent = 'Ravens Win Probability'; svg.appendChild(yl);
+    const xl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    xl.setAttribute('x', margin.l + innerW/2); xl.setAttribute('y', height - 5); xl.setAttribute('text-anchor','middle');
+    xl.setAttribute('fill','#cbd5e1'); xl.setAttribute('font-size','12'); xl.textContent = 'Minutes Elapsed (0-60)'; svg.appendChild(xl);
+    // Midline 0.5
+    const mid = document.createElementNS('http://www.w3.org/2000/svg','line');
+    mid.setAttribute('x1', margin.l); mid.setAttribute('x2', width - margin.r); mid.setAttribute('y1', scaleY(.5)); mid.setAttribute('y2', scaleY(.5));
+    mid.setAttribute('class','midline'); svg.appendChild(mid);
+  }
+
+  function renderGame(game){
+    renderAxes();
+    highlightBadge.style.display = game.highlight ? 'inline-block':'none';
+
+    // Path
+    let pts = game.plays.slice();
+    if(!pts.length) return;
+    // If regulation ended before exactly 60.0, extend flat segment to 60 (synthetic)
+    const lastReal = pts[pts.length-1];
+    let syntheticAdded = false;
+    if(lastReal.t < 60) {
+      pts = pts.concat([{ t: 60, wp: lastReal.wp, synthetic: true }]);
+      syntheticAdded = true;
+    }
+    const d = pts.map((p,i)=> (i===0? 'M':'L') + scaleX(p.t) + ' ' + scaleY(p.wp)).join(' ');
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', d);
+    path.setAttribute('class', 'wp-line' + (game.highlight? ' highlight':'') );
+    svg.appendChild(path);
+
+    // Endpoint
+  const end = pts[pts.length-1];
+    const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circ.setAttribute('cx', scaleX(end.t));
+    circ.setAttribute('cy', scaleY(end.wp));
+    circ.setAttribute('r', 6.5);
+    circ.setAttribute('class', 'endpoint ' + (game.final_wp ? 'win':'loss'));
+    svg.appendChild(circ);
+
+    // Hover tooltip removed; keeping chart static.
+
+    // Meta
+    metaEl.textContent = `${game.game_id}\n${game.away_team} @ ${game.home_team}\nResult: ${game.result}\nFinal WP: ${game.final_wp}\nScore: BAL ${game.points.ravens} - Opp ${game.points.opponent}`;
+  }
+
+  select.addEventListener('change', ()=>{
+    const g = games.find(x=> x.game_id === select.value);
+    renderGame(g);
+  });
+
+  // Initial
+  renderGame(games.find(g=> g.game_id === select.value));
+})();
+</script>
+</body>
+</html>
